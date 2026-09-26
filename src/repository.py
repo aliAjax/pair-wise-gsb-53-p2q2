@@ -47,6 +47,16 @@ class Repository:
                     details TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS persons (
+                    person_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT '',
+                    organization TEXT NOT NULL DEFAULT '',
+                    relative_ids TEXT NOT NULL DEFAULT '[]',
+                    company_ids TEXT NOT NULL DEFAULT '[]',
+                    updated_by TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_records_state ON records(state);
                 CREATE INDEX IF NOT EXISTS idx_audit_record ON audit_events(record_id, id);
                 """
@@ -141,6 +151,72 @@ class Repository:
         with self._connect() as connection:
             rows = connection.execute("SELECT state, COUNT(*) AS total FROM records GROUP BY state").fetchall()
         return {str(row["state"]): int(row["total"]) for row in rows}
+
+    @staticmethod
+    def _person_row(row: sqlite3.Row) -> Dict[str, Any]:
+        item = dict(row)
+        item["relative_ids"] = json.loads(item["relative_ids"])
+        item["company_ids"] = json.loads(item["company_ids"])
+        return item
+
+    def upsert_person(self, person_id: str, profile: Dict[str, Any], actor_id: str) -> Dict[str, Any]:
+        now = _now()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO persons(person_id,name,role,organization,relative_ids,company_ids,updated_by,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(person_id) DO UPDATE SET name=excluded.name,role=excluded.role,"
+                "organization=excluded.organization,relative_ids=excluded.relative_ids,"
+                "company_ids=excluded.company_ids,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+                (person_id, profile["name"], profile["role"], profile["organization"],
+                 json.dumps(profile["relative_ids"], ensure_ascii=False),
+                 json.dumps(profile["company_ids"], ensure_ascii=False), actor_id, now),
+            )
+            row = connection.execute("SELECT * FROM persons WHERE person_id=?", (person_id,)).fetchone()
+        return self._person_row(row)
+
+    def get_person(self, person_id: str) -> Optional[Dict[str, Any]]:
+        person = self.persons_map([person_id]).get(person_id)
+        if person is None or not person.get("name"):
+            return None
+        return person
+
+    def list_persons(self) -> List[Dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM persons ORDER BY person_id").fetchall()
+        return [self._person_row(row) for row in rows]
+
+    def persons_map(self, person_ids) -> Dict[str, Dict[str, Any]]:
+        ids = sorted({pid for pid in person_ids if pid})
+        if not ids:
+            return {}
+        with self._connect() as connection:
+            # 载入全量人员以补全双向亲属关系（原型规模）
+            rows = connection.execute("SELECT * FROM persons").fetchall()
+        result = {pid: {"person_id": pid, "name": "", "role": "", "organization": "",
+                        "relative_ids": [], "company_ids": []} for pid in ids}
+        for row in rows:
+            item = self._person_row(row)
+            if item["person_id"] in result:
+                result[item["person_id"]] = item
+        # 补成双向亲属关系，使单方登记即可被核验命中
+        known = set(result)
+        loaded = {row["person_id"]: json.loads(row["relative_ids"]) for row in rows}
+        kinship = {pid: set(result[pid]["relative_ids"]) for pid in result}
+        for pid in list(known):
+            for relative in loaded.get(pid, result[pid]["relative_ids"]):
+                if relative in known:
+                    kinship[relative].add(pid)
+        # 未被直接加载、但登记了指向本案方关系的人员
+        for pid, relatives in loaded.items():
+            if pid in known:
+                continue
+            for target in relatives:
+                if target in known:
+                    kinship[target].add(pid)
+        for pid in result:
+            result[pid]["relative_ids"] = sorted(kinship[pid])
+        return result
 
     def health(self) -> bool:
         try:

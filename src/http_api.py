@@ -12,6 +12,7 @@ from .domain import Actor, DomainError, PermissionDenied, ValidationError
 RECORD_RE = re.compile(r"^/api/records/(\d+)$")
 ACTION_RE = re.compile(r"^/api/records/(\d+)/actions/([a-z_]+)$")
 AUDIT_RE = re.compile(r"^/api/records/(\d+)/audit$")
+PERSON_RE = re.compile(r"^/api/persons/([^/]+)$")
 
 
 def make_handler(service: Any, static_dir: Path):
@@ -84,6 +85,14 @@ def make_handler(service: Any, static_dir: Path):
                 if match:
                     self._send(200, {"items": service.timeline(self._actor(), int(match.group(1)))})
                     return
+                if parsed.path == "/api/persons":
+                    self._send(200, {"items": service.list_persons(self._actor())})
+                    return
+                match = PERSON_RE.match(parsed.path)
+                if match:
+                    from urllib.parse import unquote
+                    self._send(200, service.get_person(self._actor(), unquote(match.group(1))))
+                    return
                 if parsed.path == "/api/stats":
                     self._send(200, service.stats(self._actor()))
                     return
@@ -98,6 +107,13 @@ def make_handler(service: Any, static_dir: Path):
                 if parsed.path == "/api/records":
                     record = service.create(self._actor(), body.get("reference", ""), body.get("data", {}))
                     self._send(201, record)
+                    return
+                if parsed.path == "/api/persons":
+                    person_id = body.get("person_id", "")
+                    if not isinstance(person_id, str) or not person_id.strip():
+                        raise ValidationError("person_id不能为空")
+                    person = service.upsert_person(self._actor(), person_id, body.get("data", {}))
+                    self._send(200, person)
                     return
                 match = ACTION_RE.match(parsed.path)
                 if match:
