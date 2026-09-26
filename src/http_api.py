@@ -12,6 +12,9 @@ from .domain import Actor, DomainError, PermissionDenied, ValidationError
 RECORD_RE = re.compile(r"^/api/records/(\d+)$")
 ACTION_RE = re.compile(r"^/api/records/(\d+)/actions/([a-z_]+)$")
 AUDIT_RE = re.compile(r"^/api/records/(\d+)/audit$")
+ASSIGN_RE = re.compile(r"^/api/records/(\d+)/assignments$")
+ASSIGNMENT_RE = re.compile(r"^/api/assignments/(\d+)/(review|recheck)$")
+PERSON_RE = re.compile(r"^/api/personnel/([A-Za-z0-9_\-]+)$")
 
 
 def make_handler(service: Any, static_dir: Path):
@@ -76,6 +79,19 @@ def make_handler(service: Any, static_dir: Path):
                     records = service.list_records(self._actor(), state=query.get("state", [None])[0], limit=int(query.get("limit", ["100"])[0]))
                     self._send(200, {"items": records})
                     return
+                if parsed.path == "/api/personnel":
+                    records = service.list_persons(self._actor(), limit=int(parse_qs(parsed.query).get("limit", ["200"])[0]))
+                    self._send(200, {"items": records})
+                    return
+                match = PERSON_RE.match(parsed.path)
+                if match:
+                    self._send(200, service.get_person(self._actor(), match.group(1)))
+                    return
+                match = ASSIGN_RE.match(parsed.path)
+                if match:
+                    record = service.get_record(self._actor(), int(match.group(1)))
+                    self._send(200, {"items": record["assignments"]})
+                    return
                 match = RECORD_RE.match(parsed.path)
                 if match:
                     self._send(200, service.get_record(self._actor(), int(match.group(1))))
@@ -98,6 +114,23 @@ def make_handler(service: Any, static_dir: Path):
                 if parsed.path == "/api/records":
                     record = service.create(self._actor(), body.get("reference", ""), body.get("data", {}))
                     self._send(201, record)
+                    return
+                if parsed.path == "/api/personnel":
+                    self._send(201, service.upsert_person(self._actor(), body.get("data", {})))
+                    return
+                match = ASSIGNMENT_RE.match(parsed.path)
+                if match:
+                    assignment_id, sub_action = int(match.group(1)), match.group(2)
+                    if sub_action == "review":
+                        record = service.review_assignment(self._actor(), assignment_id, body.get("data", {}))
+                    else:
+                        record = service.recheck_assignment(self._actor(), assignment_id)
+                    self._send(200, record)
+                    return
+                match = ASSIGN_RE.match(parsed.path)
+                if match:
+                    record = service.assign(self._actor(), int(match.group(1)), body.get("data", {}))
+                    self._send(200, record)
                     return
                 match = ACTION_RE.match(parsed.path)
                 if match:

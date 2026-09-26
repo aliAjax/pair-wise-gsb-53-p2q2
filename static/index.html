@@ -6,28 +6,199 @@
   <title>移民案件期限与材料管理</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-    main { max-width: 960px; margin: auto; }
-    button { padding: .55rem .9rem; cursor: pointer; }
+    main { max-width: 1060px; margin: auto; }
+    button { padding: .5rem .85rem; cursor: pointer; }
     pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
+    .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin: .5rem 0; }
+    fieldset { border: 1px solid #d4dae0; border-radius: 10px; margin: 1rem 0; padding: .75rem 1rem 1rem; }
+    legend { font-weight: 600; padding: 0 .4rem; }
+    label { font-size: .9rem; color: #3c4753; }
+    input, select, textarea { padding: .4rem .5rem; border: 1px solid #b7c0ca; border-radius: 6px; font: inherit; }
+    .status-active { color: #1a7f37; font-weight: 600; }
+    .status-pending_review { color: #b35900; font-weight: 600; }
+    .status-rejected { color: #c02d2d; font-weight: 600; }
+    .status-removed { color: #76818d; }
+    table { border-collapse: collapse; width: 100%; margin-top: .5rem; font-size: .9rem; }
+    th, td { border: 1px solid #dde2e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+    th { background: #f0f3f6; }
   </style>
 </head>
 <body>
 <main>
   <h1>移民案件期限与材料管理</h1>
-  <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
-  <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
-  <pre id="output">点击上方按钮读取服务状态。</pre>
+
+  <fieldset>
+    <legend>调用身份</legend>
+    <div class="row">
+      <label>用户 <input id="uid" value="demo-admin" size="10"></label>
+      <label>角色
+        <select id="role">
+          <option value="admin">admin</option>
+          <option value="supervisor">supervisor 主管</option>
+          <option value="intake_officer">intake_officer 收案</option>
+          <option value="case_officer">case_officer</option>
+          <option value="legal_rep">legal_rep 律师</option>
+        </select>
+      </label>
+      <button onclick="loadRecords()">加载案件</button>
+      <button onclick="loadPersons()">加载人员</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>1. 人员资料（亲属关系 / 共同公司，仅主管可维护）</legend>
+    <div class="row">
+      <label>人员ID <input id="p_id" size="10" value="LAW-FAM"></label>
+      <label>姓名 <input id="p_name" size="10" value="秦律"></label>
+      <label>亲属对方ID <input id="p_rel_id" size="9" value="A-900"></label>
+      <label>对方身份
+        <select id="p_rel_kind"><option value="applicant">申请人</option><option value="sponsor">担保人</option></select>
+      </label>
+      <label>关系 <input id="p_rel" size="8" value="夫妻"></label>
+      <label>共同公司ID <input id="p_co_id" size="9" value=""></label>
+      <label>公司名 <input id="p_co_name" size="10" value=""></label>
+      <button onclick="savePerson()">保存人员资料</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>2. 收案（可同时指派主办/协办，指派前自动核验利益冲突）</legend>
+    <div class="row">
+      <label>引用 <input id="c_ref" size="10" value="IMM-50001"></label>
+      <label>申请人ID <input id="c_applicant" size="9" value="A-900"></label>
+      <label>担保人ID <input id="c_sponsor" size="9" value="S-1"></label>
+      <label>申请人公司 <input id="c_app_co" size="9" value=""></label>
+      <label>担保人公司 <input id="c_spo_co" size="9" value="CO-S"></label>
+    </div>
+    <div class="row">
+      <label>主办律师ID <input id="c_lead" size="10" value="LAW-FAM"></label>
+      <label>协办ID <input id="c_assistant" size="10" value=""></label>
+      <button onclick="createCase()">收案并核验</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>3. 案件操作（选中案件ID）</legend>
+    <div class="row">
+      <label>案件ID <input id="record_id" size="5" value="1"></label>
+      <label>版本 <input id="version" size="4" value="1"></label>
+      <button onclick="getRecord()">查看详情（冲突来源/状态/放行依据）</button>
+      <button onclick="submitCase()">提交材料</button>
+    </div>
+    <div class="row">
+      <label>席位 <select id="a_role"><option value="lead">主办律师</option><option value="assistant">协办</option></select></label>
+      <label>新人员ID <input id="a_person" size="10" value="LAW-OK"></label>
+      <button onclick="assignCase()">换人/指派（重新核验）</button>
+    </div>
+    <div class="row">
+      <label>指派ID <input id="assign_id" size="5" value="1"></label>
+      <label>决定 <select id="rv_decision"><option value="approved">放行 approved</option><option value="rejected">驳回 rejected</option></select></label>
+      <label>理由 <input id="rv_reason" size="42" placeholder="主管必须写明理由"></label>
+      <button onclick="reviewAssignment()">主管复核</button>
+      <button onclick="recheckAssignment()">重新核验（重开后仍可核对）</button>
+    </div>
+  </fieldset>
+
+  <pre id="output">操作结果将显示在这里。</pre>
+  <div id="cards"></div>
 </main>
 <script>
-const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
-async function show(path) {
-  const response = await fetch(path, {headers});
-  const data = await response.json();
-  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+function headers(json) {
+  const h = {"X-User-Id": document.getElementById("uid").value, "X-Role": document.getElementById("role").value};
+  if (json) h["Content-Type"] = "application/json";
+  return h;
 }
-document.getElementById("load").onclick = () => show("/api/records?limit=20");
-document.getElementById("stats").onclick = () => show("/api/stats");
+async function call(method, path, body) {
+  const res = await fetch(path, {method, headers: headers(body !== undefined), body: body ? JSON.stringify(body) : undefined});
+  const data = await res.json().catch(() => ({}));
+  show(method + " " + path + "  => HTTP " + res.status, data);
+  return data;
+}
+function show(title, data) {
+  document.getElementById("output").textContent = title + "\n\n" + JSON.stringify(data, null, 2);
+}
+function listVal(value) {
+  const v = (value || "").trim();
+  return v ? v.split(",").map(s => s.trim()).filter(Boolean) : [];
+}
+function val(id) { return document.getElementById(id).value; }
+
+function savePerson() {
+  const relatives = [];
+  if (val("p_rel_id")) relatives.push({other_party_id: val("p_rel_id"), other_party_kind: val("p_rel_kind"), relation: val("p_rel") || "亲属"});
+  const companies = [];
+  if (val("p_co_id")) companies.push({company_id: val("p_co_id"), company_name: val("p_co_name"), relation: ""});
+  call("POST", "/api/personnel", {data: {person_id: val("p_id"), name: val("p_name"), relatives, companies}});
+}
+async function loadPersons() {
+  const data = await call("GET", "/api/personnel?limit=200");
+  if (data.items && data.items.length) {
+    const p = data.items[0];
+    document.getElementById("p_id").value = p.person_id;
+    document.getElementById("p_name").value = p.name;
+  }
+}
+function createCase() {
+  const data = {
+    applicant_id: val("c_applicant"), case_type: "family",
+    received_day: 100, deadline_days: 30, response_day: 110,
+    representation_active: true, required_documents: ["passport", "sponsor_letter"],
+    applicant_company_ids: listVal(val("c_app_co")),
+    sponsor_company_ids: listVal(val("c_spo_co")),
+  };
+  if (val("c_sponsor")) data.sponsor_id = val("c_sponsor");
+  if (val("c_lead")) data.lead_person_id = val("c_lead");
+  if (val("c_assistant")) data.assistant_person_id = val("c_assistant");
+  call("POST", "/api/records", {reference: val("c_ref"), data}).then(r => {
+    if (r.id) { document.getElementById("record_id").value = r.id; document.getElementById("version").value = r.version; }
+  });
+}
+async function getRecord() {
+  const data = await call("GET", "/api/records/" + val("record_id"));
+  if (data && data.id !== undefined) {
+    document.getElementById("version").value = data.version;
+    renderAssignments(data);
+  }
+}
+function renderAssignments(record) {
+  let html = "<table><tr><th>席位</th><th>人员</th><th>处理状态</th><th>冲突来源</th><th>放行依据</th></tr>";
+  for (const a of (record.assignments || [])) {
+    const src = (a.conflicts || []).map(c => "• " + c.description).join("<br>") || "—";
+    const rv = a.latest_review ? (a.latest_review.decision + "｜" + a.latest_review.reviewer_id + "｜" + a.latest_review.reason) : "—";
+    html += `<tr><td>${a.role_label}</td><td>${a.person_id} ${a.person_name || ""}<br><small>指派#${a.id} ${a.note || ""}</small></td>
+      <td class="status-${a.status}">${a.status}</td><td>${src}</td><td>${rv}</td></tr>`;
+  }
+  html += "</table>";
+  document.getElementById("cards").innerHTML = html;
+}
+function submitCase() {
+  call("POST", `/api/records/${val("record_id")}/actions/submit`,
+    {expected_version: parseInt(val("version"), 10), data: {documents: ["passport", "sponsor_letter"]}}).then(r => {
+      if (r.version) document.getElementById("version").value = r.version;
+    });
+}
+function assignCase() {
+  call("POST", `/api/records/${val("record_id")}/assignments`, {data: {role: val("a_role"), person_id: val("a_person")}}).then(r => {
+    if (r && r.id !== undefined) renderAssignments(r);
+  });
+}
+function reviewAssignment() {
+  call("POST", `/api/assignments/${val("assign_id")}/review`, {data: {decision: val("rv_decision"), reason: val("rv_reason")}}).then(r => {
+    if (r && r.id !== undefined) renderAssignments(r);
+  });
+}
+function recheckAssignment() {
+  call("POST", `/api/assignments/${val("assign_id")}/recheck`, {}).then(r => {
+    if (r && r.id !== undefined) renderAssignments(r);
+  });
+}
+async function loadRecords() {
+  const data = await call("GET", "/api/records?limit=20");
+  if (data.items && data.items.length) {
+    document.getElementById("record_id").value = data.items[0].id;
+    document.getElementById("version").value = data.items[0].version;
+  }
+}
 </script>
 </body>
 </html>
